@@ -7,6 +7,8 @@ import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityT
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -59,6 +61,10 @@ public final class RailNet implements ModInitializer {
     }
 
     @Override public void onInitialize() {
+        PayloadTypeRegistry.playS2C().register(RailGuiPackets.State.ID,RailGuiPackets.State.CODEC);
+        PayloadTypeRegistry.playC2S().register(RailGuiPackets.Action.ID,RailGuiPackets.Action.CODEC);
+        ServerPlayNetworking.registerGlobalReceiver(RailGuiPackets.Action.ID,(payload,context)->
+            context.server().execute(()->RailScreens.accept(context.player(),payload)));
         register("rail_controller", CONTROLLER);
         register("station_controller", STATION_CONTROLLER);
         register("junction_controller", JUNCTION_CONTROLLER);
@@ -129,8 +135,9 @@ public final class RailNet implements ModInitializer {
             return ActionResult.PASS;
         });
         ServerTickEvents.END_WORLD_TICK.register(world -> TrainData.get(world).tick(world));
-        ServerTickEvents.END_SERVER_TICK.register(server -> RailScreens.finishClicks());
-        ServerPlayConnectionEvents.DISCONNECT.register((handler,server)->FIRST_CART.remove(handler.player.getUuid()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler,server)->{
+            FIRST_CART.remove(handler.player.getUuid());RailScreens.disconnect(handler.player);
+        });
         RailCommands.register();
     }
     private static void register(String name, Block block) {

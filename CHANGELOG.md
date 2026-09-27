@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 – Custom GUI, Route Diagnostics, and Block Sections — 2026-09-28
+
+- Replaced the previous inventory and anvil-based menus with a unified custom client GUI for trains, components, timetable displays, lines, and timetables. The interface now supports buttons, pagination, icons, and text input, with the world rendered and blurred only once behind the panel.
+- Menu data is provided through limited server-side snapshots with translatable text. Actions are validated using short-lived session IDs together with tool, distance, and object-state checks; sessions are invalidated when the menu is closed or the player disconnects.
+- Minecarts can now be coupled entirely through the RailNet Tool GUI by selecting the first minecart, opening the second, and confirming the coupling. Chains remain available as an alternative.
+- Train diagnostics now display the destination, current status, route progress, obstacles, pending departures, foreign block-section reservations, and the number of detected sections. A dedicated action can request a new route.
+- Route finding now compresses continuous rail segments into directed edges for each route request and searches between endpoints, switches, crossings, and controllers. The previous limited rail search remains available as a fallback, and both systems use the current rail state from loaded chunks.
+- Pairs of block controllers now define reservable track sections. Before entering, the server checks the complete section for loaded chunks, other minecarts, and existing reservations. Reservations apply in both directions and remain active until the final minecart has passed or the section has actually been cleared.
+- Block controllers and signal controls now report **clear**, **reserved**, or **occupied** states in the GUI. Comparator level 8 also reflects section reservations.
+- Waiting trains can periodically attempt an alternative route when track is missing. If no safe route is available, the train remains stopped, while blocked or locked routes avoid unnecessary repeated searches.
+- Route finding was checked against deterministic rail layouts covering long straights, branches, loops, search limits, and reverse-direction routing. Java syntax and JSON resources were also statically validated.
+- Textures added for all blocks and the rail tool
+
 ## 0.4.0 – Separate Components and RailNet Tool — 2026-09-27
 
 - The six controller modes have been split into six individually registered blocks, each with its own recipes, items, block states, loot tables, names, and existing individual textures. The crossing rail remains a separate block.

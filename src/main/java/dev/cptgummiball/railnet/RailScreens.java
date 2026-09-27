@@ -1,75 +1,81 @@
 package dev.cptgummiball.railnet;
 
-import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
-import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.screen.AnvilScreenHandler;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ScreenHandlerType;
-import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
-import net.minecraft.screen.slot.SlotActionType;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.HashMap;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-/** Server-side controls using Vanilla container and anvil screens. */
+/** Server-owned GUI sessions with short lived action maps; the client renders a real Screen. */
 public final class RailScreens {
     private RailScreens() {}
     private static boolean hasTool(ServerPlayerEntity player) {
         return player.getMainHandStack().isOf(RailNet.TOOL)
             || player.getOffHandStack().isOf(RailNet.TOOL);
     }
-    private static final ConcurrentLinkedQueue<Runnable> PENDING=new ConcurrentLinkedQueue<>();
-    public static void finishClicks() {
-        Runnable action;
-        while((action=PENDING.poll())!=null)action.run();
+    private static final Map<UUID,Session> SESSIONS=new HashMap<>();
+    private static final Map<UUID,UUID> COUPLING=new HashMap<>();
+    private static long nextSession;
+    private static final class Session {
+        final long id;
+        final BooleanSupplier valid;
+        final Map<Integer,Runnable> actions;
+        final Consumer<String> rename;
+        long expires;
+        Session(long id,BooleanSupplier valid,Map<Integer,Runnable> actions,Consumer<String> rename,long expires) {
+            this.id=id;this.valid=valid;this.actions=actions;this.rename=rename;this.expires=expires;
+        }
     }
-    public static final class Menu extends GenericContainerScreenHandler {
-        private final SimpleInventory icons;
+    public static void disconnect(ServerPlayerEntity player) {
+        SESSIONS.remove(player.getUuid());COUPLING.remove(player.getUuid());
+    }
+    public static void accept(ServerPlayerEntity player,RailGuiPackets.Action packet) {
+        Session session=SESSIONS.get(player.getUuid());
+        if(session==null||session.id!=packet.session())return;
+        if(packet.slot()==-2) { SESSIONS.remove(player.getUuid());return; }
+        if(!player.isAlive()||player.getServerWorld().getTime()>session.expires||!session.valid.getAsBoolean()) {
+            SESSIONS.remove(player.getUuid());
+            ServerPlayNetworking.send(player,new RailGuiPackets.State(session.id,2,Text.empty(),"",List.of()));
+            return;
+        }
+        if(packet.slot()==-1) {
+            if(session.rename==null||packet.value()==null||packet.value().isBlank()||packet.value().length()>40)return;
+            SESSIONS.remove(player.getUuid());
+            session.rename.accept(packet.value().trim());
+            return;
+        }
+        Runnable action=session.actions.get(packet.slot());
+        if(action==null||session.rename!=null)return;
+        SESSIONS.remove(player.getUuid());
+        action.run();
+    }
+    public static final class Menu {
         private final Map<Integer,Runnable> actions=new HashMap<>();
-        private final ServerPlayerEntity owner;
-        private final BooleanSupplier valid;
-        Menu(int sync,PlayerInventory player,ServerPlayerEntity owner,BooleanSupplier valid) {
-            this(sync,player,owner,valid,new SimpleInventory(54));
-        }
-        private Menu(int sync,PlayerInventory player,ServerPlayerEntity owner,BooleanSupplier valid,SimpleInventory inventory) {
-            super(ScreenHandlerType.GENERIC_9X6,sync,player,inventory,6);
-            icons=inventory;this.owner=owner;this.valid=valid;
-        }
+        private final List<RailGuiPackets.Entry> entries=new ArrayList<>();
         public void icon(int slot,Item item,Text label,Runnable action) {
-            ItemStack stack=new ItemStack(item);stack.set(DataComponentTypes.CUSTOM_NAME,label);
-            icons.setStack(slot,stack);actions.put(slot,action);
+            if(slot<0||slot>=54||action==null)throw new IllegalArgumentException("Invalid GUI slot");
+            entries.add(new RailGuiPackets.Entry(slot,Registries.ITEM.getId(item).toString(),label));
+            actions.put(slot,action);
         }
-        @Override public void onSlotClick(int slot,int button,SlotActionType type,PlayerEntity player) {
-            if(player!=owner||!canUse(player)||slot<0||slot>=54||type!=SlotActionType.PICKUP)return;
-            Runnable action=actions.get(slot);
-            if(action!=null) {
-                owner.closeHandledScreen();
-                PENDING.add(()->{if(owner.isAlive()&&valid.getAsBoolean())action.run();});
-            }
-        }
-        @Override public ItemStack quickMove(PlayerEntity player,int index){return ItemStack.EMPTY;}
-        @Override public boolean canUse(PlayerEntity player){return player==owner&&valid.getAsBoolean();}
-        @Override public void onClosed(PlayerEntity player){/* All icons are virtual. */}
     }
     static void open(ServerPlayerEntity player,Text title,BooleanSupplier valid,Consumer<Menu> fill) {
         if(!valid.getAsBoolean())return;
-        player.openHandledScreen(new SimpleNamedScreenHandlerFactory((id,inventory,ignored)->{
-            Menu menu=new Menu(id,inventory,player,valid);fill.accept(menu);return menu;
-        },title));
+        Menu menu=new Menu();fill.accept(menu);
+        long session=++nextSession;
+        SESSIONS.put(player.getUuid(),new Session(session,valid,menu.actions,null,player.getServerWorld().getTime()+1200));
+        ServerPlayNetworking.send(player,new RailGuiPackets.State(session,0,title,"",List.copyOf(menu.entries)));
     }
     private static boolean near(ServerPlayerEntity p,Entity e) {
         return e.isAlive()&&e.getWorld()==p.getWorld()&&p.squaredDistanceTo(e)<=100;
@@ -80,8 +86,11 @@ public final class RailScreens {
     }
     static boolean trainValid(ServerPlayerEntity p,TrainData.Train t) {
         if(!hasTool(p)||TrainData.get(p.getServerWorld()).byId(t.id)!=t||t.carts.isEmpty())return false;
-        Entity lead=p.getServerWorld().getEntity(t.carts.getFirst());
-        return lead instanceof AbstractMinecartEntity&&near(p,lead);
+        for(UUID id:t.carts) {
+            Entity cart=p.getServerWorld().getEntity(id);
+            if(cart instanceof AbstractMinecartEntity &&near(p,cart))return true;
+        }
+        return false;
     }
     static boolean controllerValid(ServerPlayerEntity p,ControllerEntity c) {
         return hasTool(p)&&near(p,c.getPos())&&p.getServerWorld().getBlockEntity(c.getPos())==c;
@@ -90,22 +99,32 @@ public final class RailScreens {
         if(!hasTool(player)||!near(player,cart))return;
         TrainData data=TrainData.get(player.getServerWorld());
         TrainData.Train train=data.byCart(cart.getUuid());
-        if(train!=null){openTrain(player,train);return;}
+        if(train!=null){openTrain(player,train,cart);return;}
         open(player,Text.translatable("railnet.gui.cart"),()->hasTool(player)&&near(player,cart)
             &&data.byCart(cart.getUuid())==null,menu->{
             menu.icon(22,Items.MINECART,Text.translatable("railnet.gui.create_train"),()->{
                 data.ensure(cart);openCart(player,cart);
             });
-            menu.icon(31,Items.CHAIN,Text.translatable("railnet.gui.coupling_tip"),()->openCart(player,cart));
+            couplingButton(player,cart,menu,31,()->openCart(player,cart));
+            if(cart.getUuid().equals(COUPLING.get(player.getUuid())))
+                menu.icon(32,Items.RAIL,Text.translatable("railnet.gui.coupling_waiting"),()->openCart(player,cart));
         });
     }
     public static void openTrain(ServerPlayerEntity player,TrainData.Train train) {
+        for(UUID id:train.carts) {
+            Entity cart=player.getServerWorld().getEntity(id);
+            if(cart instanceof AbstractMinecartEntity minecart && near(player,cart)) {
+                openTrain(player,train,minecart);return;
+            }
+        }
+    }
+    private static void openTrain(ServerPlayerEntity player,TrainData.Train train,AbstractMinecartEntity clicked) {
         TrainData data=TrainData.get(player.getServerWorld());
         BooleanSupplier valid=()->trainValid(player,train);
         open(player,Text.translatable("railnet.gui.train",train.name,
             Text.translatable("railnet.gui.status."+train.status.name().toLowerCase())),valid,menu->{
             menu.icon(10,Items.NAME_TAG,Text.translatable("railnet.gui.rename",train.name),()->rename(player,train.name,valid,
-                name->{train.name=name;data.markDirty();}));
+                name->{train.name=name;data.markDirty();openTrain(player,train);}));
             menu.icon(12,Items.COMPASS,Text.translatable("railnet.gui.destination"),()->destinations(player,train,0));
             menu.icon(14,Items.MAP,Text.translatable("railnet.gui.line"),()->LinesScreen.list(player,train,0));
             menu.icon(16,Items.CLOCK,Text.translatable("railnet.gui.schedule"),()->LinesScreen.schedule(player,train));
@@ -121,7 +140,57 @@ public final class RailScreens {
             menu.icon(34,Items.POWERED_RAIL,Text.translatable("railnet.gui.speed",train.preset+1),()->{
                 train.preset=(train.preset+1)%3;data.markDirty();openTrain(player,train);
             });
+            menu.icon(36,Items.SPYGLASS,Text.translatable("railnet.gui.diagnostics"),()->diagnostics(player,train));
+            if(train.status!=TrainData.Status.RUNNING)couplingButton(player,clicked,menu,40,()->openTrain(player,train,clicked));
+            if(clicked.getUuid().equals(COUPLING.get(player.getUuid())))
+                menu.icon(41,Items.RAIL,Text.translatable("railnet.gui.coupling_waiting"),()->openTrain(player,train,clicked));
             menu.icon(49,Items.CHAIN,Text.translatable("railnet.gui.carts",train.carts.size()),()->carts(player,train));
+        });
+    }
+    private static void couplingButton(ServerPlayerEntity player,AbstractMinecartEntity clicked,Menu menu,int slot,Runnable refresh) {
+        UUID first=COUPLING.get(player.getUuid());
+        if(first==null)menu.icon(slot,Items.CHAIN,Text.translatable("railnet.gui.coupling_select"),()->{
+            COUPLING.put(player.getUuid(),clicked.getUuid());refresh.run();
+        });
+        else if(first.equals(clicked.getUuid()))
+            menu.icon(slot,Items.BARRIER,Text.translatable("railnet.gui.coupling_cancel"),()->{
+                COUPLING.remove(player.getUuid());refresh.run();
+            });
+        else menu.icon(slot,Items.CHAIN,Text.translatable("railnet.gui.coupling_confirm"),()->{
+            COUPLING.remove(player.getUuid());
+            Entity selected=player.getServerWorld().getEntity(first);
+            TrainData data=TrainData.get(player.getServerWorld());
+            if(!(selected instanceof AbstractMinecartEntity a)||!a.isAlive()||!clicked.isAlive()
+                ||!near(player,clicked)||a.squaredDistanceTo(clicked)>36||!data.couple(a,clicked))
+                player.sendMessage(Text.translatable("railnet.coupling_failed"),true);
+            openCart(player,clicked);
+        });
+    }
+    private static void diagnostics(ServerPlayerEntity player,TrainData.Train train) {
+        TrainData data=TrainData.get(player.getServerWorld());
+        open(player,Text.translatable("railnet.gui.diagnostics"),()->trainValid(player,train),menu->{
+            TrainData.TextDiagnostic detail=data.diagnose(player.getServerWorld(),train);
+            menu.icon(10,Items.MINECART,Text.translatable("railnet.gui.train",train.name,
+                Text.translatable("railnet.gui.status."+train.status.name().toLowerCase())),()->diagnostics(player,train));
+            TrainData.Station station=train.destination==null?null:data.station(train.destination);
+            menu.icon(12,Items.COMPASS,Text.translatable("railnet.gui.diagnostic.target",
+                station==null?Text.translatable("railnet.gui.missing_station"):Text.literal(station.name())),()->diagnostics(player,train));
+            Text reason=Text.translatable(detail.translationKey());
+            if(detail.at()!=null)reason=Text.translatable("railnet.gui.diagnostic.at",reason,
+                detail.at().getX(),detail.at().getY(),detail.at().getZ());
+            menu.icon(14,Items.REDSTONE_TORCH,reason,()->diagnostics(player,train));
+            menu.icon(16,Items.RAIL,Text.translatable("railnet.gui.diagnostic.progress",train.index,train.path.size()),
+                ()->diagnostics(player,train));
+            menu.icon(18,Items.REDSTONE_TORCH,Text.translatable("railnet.gui.diagnostic.sections",train.sections.size()),
+                ()->diagnostics(player,train));
+            if(train.status==TrainData.Status.WAITING_FOR_DEPARTURE)
+                menu.icon(28,Items.CLOCK,Text.translatable("railnet.gui.diagnostic.seconds",
+                    Math.max(0,train.nextDepartureTick-data.serviceTick())/20),()->diagnostics(player,train));
+            if(train.status!=TrainData.Status.RUNNING && train.status!=TrainData.Status.WAITING_FOR_DEPARTURE)
+                menu.icon(30,Items.LIME_DYE,Text.translatable("railnet.gui.diagnostic.retry"),()->{
+                    data.start(player.getServerWorld(),train);diagnostics(player,train);
+                });
+            menu.icon(49,Items.ARROW,Text.translatable("railnet.gui.back"),()->openTrain(player,train));
         });
     }
     private static void destinations(ServerPlayerEntity player,TrainData.Train train,int page) {
@@ -158,7 +227,7 @@ public final class RailScreens {
         BooleanSupplier valid=()->controllerValid(player,c);
         open(player,Text.translatable("railnet.gui.controller",Text.translatable("railnet.gui.mode."+c.mode.asString())),valid,menu->{
             menu.icon(10,Items.NAME_TAG,Text.translatable("railnet.gui.rename",c.stationName),()->rename(player,c.stationName,valid,
-                name->{c.stationName=name;c.markDirty();data.register(c);}));
+                name->{c.stationName=name;c.markDirty();data.register(c);controller(player,c);}));
             if(c.getCachedState().getBlock() instanceof LegacyControllerBlock)
                 menu.icon(19,Items.SMITHING_TABLE,Text.translatable("railnet.gui.upgrade_legacy"),()->upgradeLegacy(player,c));
             if(c.mode==ControllerEntity.Mode.JUNCTION)
@@ -177,6 +246,13 @@ public final class RailScreens {
                 Text.translatable("railnet.gui.dwell",c.stopTicks/20),()->{
                     c.stopTicks=(c.stopTicks+100)%1300;c.markDirty();controller(player,c);
                 });
+            if(c.mode==ControllerEntity.Mode.BLOCK||c.mode==ControllerEntity.Mode.SIGNAL) {
+                int signal=data.signal(player.getServerWorld(),c.getPos());
+                String state=signal>=15?"occupied":signal>=8?"reserved":"free";
+                menu.icon(30,Items.REDSTONE_TORCH,
+                    Text.translatable("railnet.gui.section_state",Text.translatable("railnet.gui.section."+state)),
+                    ()->controller(player,c));
+            }
             if(c.mode==ControllerEntity.Mode.BOARD) {
                 menu.icon(31,Items.COMPASS,Text.translatable("railnet.gui.board_station"),()->boardStations(player,c,0));
                 menu.icon(32,Items.BELL,Text.translatable("railnet.gui.call_train"),()->callBoard(player,c,0));
@@ -244,27 +320,9 @@ public final class RailScreens {
     }
     public static void rename(ServerPlayerEntity player,String value,BooleanSupplier valid,Consumer<String> onChange) {
         if(!valid.getAsBoolean())return;
-        player.openHandledScreen(new SimpleNamedScreenHandlerFactory((sync,inventory,ignored)->{
-            NameHandler handler=new NameHandler(sync,inventory,player,valid,onChange);
-            ItemStack input=new ItemStack(Items.NAME_TAG);
-            input.set(DataComponentTypes.CUSTOM_NAME,Text.literal(value));
-            handler.getSlot(0).setStack(input);return handler;
-        },Text.translatable("railnet.gui.rename_title")));
-    }
-    private static final class NameHandler extends AnvilScreenHandler {
-        private final ServerPlayerEntity owner;
-        private final BooleanSupplier valid;
-        private final Consumer<String> onChange;
-        NameHandler(int sync,PlayerInventory inventory,ServerPlayerEntity owner,BooleanSupplier valid,Consumer<String> onChange) {
-            super(sync,inventory);this.owner=owner;this.valid=valid;this.onChange=onChange;
-        }
-        @Override public boolean canUse(PlayerEntity player){return player==owner&&valid.getAsBoolean();}
-        @Override public boolean setNewItemName(String name) {
-            if(valid.getAsBoolean()&&name!=null&&!name.isBlank()&&name.length()<=40)onChange.accept(name);
-            return super.setNewItemName(name);
-        }
-        @Override public void onSlotClick(int slot,int button,SlotActionType type,PlayerEntity player){/* Virtual input. */}
-        @Override public ItemStack quickMove(PlayerEntity player,int index){return ItemStack.EMPTY;}
-        @Override public void onClosed(PlayerEntity player){/* Virtual input is not dropped. */}
+        long session=++nextSession;
+        SESSIONS.put(player.getUuid(),new Session(session,valid,Map.of(),onChange,player.getServerWorld().getTime()+1200));
+        ServerPlayNetworking.send(player,new RailGuiPackets.State(session,1,Text.translatable("railnet.gui.rename_title"),
+            value.length()>40?value.substring(0,40):value,List.of()));
     }
 }

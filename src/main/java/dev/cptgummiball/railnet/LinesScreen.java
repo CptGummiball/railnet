@@ -6,7 +6,7 @@ import net.minecraft.text.Text;
 
 import java.util.List;
 
-/** Ordered line and timetable editor, backed by server-validated Vanilla screens. */
+/** Ordered line and timetable editor, backed by server-validated custom screens. */
 public final class LinesScreen {
     private LinesScreen() {}
     public static void list(ServerPlayerEntity player,TrainData.Train train,int page) {
@@ -45,7 +45,7 @@ public final class LinesScreen {
             }
             menu.icon(36,Items.NAME_TAG,Text.translatable("railnet.gui.rename",line.name),()->RailScreens.rename(player,line.name,
                 ()->RailScreens.trainValid(player,train)&&data.line(line.id)==line,
-                name->{line.name=name;data.markDirty();}));
+                name->{line.name=name;data.markDirty();edit(player,train,line,page);}));
             menu.icon(37,Items.COMPASS,Text.translatable("railnet.gui.add_stop"),()->addStop(player,train,line,0));
             menu.icon(38,Items.MINECART,Text.translatable("railnet.gui.assign_line"),()->{
                 if(!line.stops.isEmpty())data.assign(train,line);RailScreens.openTrain(player,train);

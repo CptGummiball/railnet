@@ -12,6 +12,9 @@
   "entrypoints": {
     "main": [
       "dev.cptgummiball.railnet.RailNet"
+    ],
+    "client": [
+      "dev.cptgummiball.railnet.client.RailNetClient"
     ]
   },
   "depends": {

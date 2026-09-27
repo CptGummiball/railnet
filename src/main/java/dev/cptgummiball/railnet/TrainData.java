@@ -41,6 +41,7 @@ public final class TrainData extends PersistentState {
         public double speed;
         public int preset = 1;
         public List<BlockPos> path = List.of();
+        public List<RailSections.Section> sections=List.of();
         public double[] distances = new double[0];
         public double progress;
         public int index;
@@ -57,10 +58,15 @@ public final class TrainData extends PersistentState {
     private final Map<UUID, Line> lines=new LinkedHashMap<>();
     private final Map<BlockPos, UUID> held = new HashMap<>();
     private final Set<BlockPos> occupied = new HashSet<>();
+    private final Map<BlockPos,UUID> physicalOwners=new HashMap<>();
+    private final Set<BlockPos> contested=new HashSet<>();
+    private final Map<RailSections.Key,SectionHold> sectionHeld=new HashMap<>();
+    private record SectionHold(UUID owner,Set<BlockPos> rails) {}
     private final Set<BlockPos> signaled=new HashSet<>();
     private final Map<UUID,BlockPos> lastSeen=new HashMap<>();
     private final Map<UUID,Integer> missingTicks=new HashMap<>();
     private int tick;
+    private int reroutesThisTick;
     private long serviceTick;
 
     public static TrainData get(ServerWorld world) {
@@ -184,10 +190,16 @@ public final class TrainData extends PersistentState {
             || (aTrain!=null && aTrain.status==Status.RUNNING)
             || (bTrain!=null && bTrain.status==Status.RUNNING)
             || (aTrain==null?1:aTrain.carts.size())+(bTrain==null?1:bTrain.carts.size())>32)return false;
+        // Preserve the established train's identity, line and destination when only
+        // the second clicked cart is already managed.
+        if(aTrain==null&&bTrain!=null) {
+            AbstractMinecartEntity previous=a;a=b;b=previous;
+        }
         Train first=ensure(a),second=ensure(b);
         first.carts.addAll(second.carts);
         second.carts.forEach(id -> cartToTrain.put(id, first.id));
-        trains.remove(second.id); first.path = List.of(); first.status = Status.STOPPED; markDirty(); return true;
+        trains.remove(second.id); first.path = List.of();first.sections=List.of();first.distances=new double[0];first.speed=0;
+        first.status = Status.STOPPED; markDirty(); return true;
     }
     public boolean detach(UUID cart) {
         Train train = byCart(cart);
@@ -195,7 +207,7 @@ public final class TrainData extends PersistentState {
         train.carts.remove(cart); cartToTrain.remove(cart);
         Train detached = new Train(UUID.randomUUID()); detached.carts.add(cart);
         trains.put(detached.id, detached); cartToTrain.put(cart, detached.id);
-        train.path = List.of(); train.status = Status.STOPPED; markDirty(); return true;
+        train.path = List.of();train.sections=List.of();train.status = Status.STOPPED; markDirty(); return true;
     }
     public void register(ControllerEntity c) {
         if (c.mode == ControllerEntity.Mode.STATION) stations.put(c.stationId, new Station(c.stationId, c.stationName, c.getPos()));
@@ -204,6 +216,39 @@ public final class TrainData extends PersistentState {
     }
     public void removeStation(BlockPos p) { if (stations.values().removeIf(s -> s.controller.equals(p))) markDirty(); }
     public Station station(UUID id) { return stations.get(id); }
+    /** Read-only diagnostics for the train GUI. All inspected rails must already be loaded. */
+    public TextDiagnostic diagnose(ServerWorld world, Train t) {
+        Station target=t.destination==null?null:stations.get(t.destination);
+        if(t.destination==null)return new TextDiagnostic("railnet.gui.diagnostic.no_destination",null);
+        if(target==null)return new TextDiagnostic("railnet.gui.diagnostic.station_missing",null);
+        if(!world.isChunkLoaded(target.controller()))return new TextDiagnostic("railnet.gui.diagnostic.station_unloaded",target.controller());
+        for(int i=Math.max(0,t.index);i<Math.min(t.path.size(),t.index+8);i++) {
+            BlockPos pos=t.path.get(i);
+            if(!world.isChunkLoaded(pos))return new TextDiagnostic("railnet.gui.diagnostic.chunk_unloaded",pos);
+            if(!RailPath.rail(world,pos))return new TextDiagnostic("railnet.gui.diagnostic.rail_missing",pos);
+            if(held.containsKey(pos)&&!held.get(pos).equals(t.id))
+                return new TextDiagnostic("railnet.gui.diagnostic.occupied",pos);
+        }
+        for(RailSections.Section section:t.sections) {
+            if(t.status!=Status.WAITING_FOR_TRACK||section.to()<t.index||section.from()>t.index+8)continue;
+            SectionHold hold=sectionHeld.get(section.key());
+            if(hold!=null&&!hold.owner().equals(t.id))
+                return new TextDiagnostic("railnet.gui.diagnostic.section_reserved",section.key().first());
+            for(BlockPos pos:section.rails()) {
+                if(!world.isChunkLoaded(pos))return new TextDiagnostic("railnet.gui.diagnostic.chunk_unloaded",pos);
+                if(!RailPath.rail(world,pos))return new TextDiagnostic("railnet.gui.diagnostic.rail_missing",pos);
+                UUID owner=physicalOwners.get(pos);
+                if(owner!=null&&!owner.equals(t.id))
+                    return new TextDiagnostic("railnet.gui.diagnostic.occupied",pos);
+            }
+        }
+        if(t.status==Status.WAITING_FOR_DEPARTURE)return new TextDiagnostic("railnet.gui.diagnostic.departure",null);
+        if(t.status==Status.RUNNING)return new TextDiagnostic("railnet.gui.diagnostic.running",null);
+        if(t.status==Status.WAITING_FOR_TRACK)return new TextDiagnostic("railnet.gui.diagnostic.blocked",null);
+        if(t.status==Status.ROUTE_LOST)return new TextDiagnostic("railnet.gui.diagnostic.no_path",null);
+        return new TextDiagnostic("railnet.gui.diagnostic.ready",null);
+    }
+    public record TextDiagnostic(String translationKey,BlockPos at) {}
     private static BlockPos railAt(ServerWorld world, AbstractMinecartEntity cart) {
         BlockPos p = cart.getBlockPos();
         if (RailPath.rail(world, p)) return p;
@@ -211,7 +256,7 @@ public final class TrainData extends PersistentState {
         return null;
     }
     public boolean start(ServerWorld world, Train t) {
-        t.status = Status.STOPPED; t.speed = 0; t.path = List.of();
+        t.status = Status.STOPPED; t.speed = 0; t.path = List.of();t.sections=List.of();
         if (t.destination == null || t.carts.isEmpty()) return false;
         Station station = stations.get(t.destination);
         if (station == null || !world.isChunkLoaded(station.controller)
@@ -243,12 +288,12 @@ public final class TrainData extends PersistentState {
             all.add(railAt(world, follower));
         }
         all.addAll(route);
-        t.path = all; t.index = all.size() - route.size();
+        t.path = all; t.sections=RailSections.along(world,all);t.index = all.size() - route.size();
         t.distances = new double[all.size()];
         for (int i = 1; i < all.size(); i++) t.distances[i] = t.distances[i-1] + Math.sqrt(all.get(i).getSquaredDistance(all.get(i-1)));
         t.progress = t.distances[t.index]; t.speed = 0; t.status = Status.RUNNING; markDirty(); return true;
     }
-    public void stop(Train t) { t.status = Status.STOPPED; t.speed = 0; t.path = List.of(); t.distances = new double[0]; markDirty(); }
+    public void stop(Train t) { t.status = Status.STOPPED; t.speed = 0; t.path = List.of();t.sections=List.of(); t.distances = new double[0]; markDirty(); }
     public void stopAt(ServerWorld world,BlockPos controller) {
         BlockPos rail=RailPath.nearby(world,controller);
         if(rail==null)return;
@@ -260,7 +305,7 @@ public final class TrainData extends PersistentState {
         }
     }
     public void tick(ServerWorld world) {
-        tick++;serviceTick++;held.clear();occupied.clear();
+        tick++;serviceTick++;reroutesThisTick=0;held.clear();occupied.clear();physicalOwners.clear();contested.clear();
         if(tick%1200==0)markDirty();
         for (Train t : trains.values()) for (UUID id : t.carts) {
             Entity e = world.getEntity(id);
@@ -268,8 +313,10 @@ public final class TrainData extends PersistentState {
                 lastSeen.put(id,e.getBlockPos());missingTicks.remove(id);
                 BlockPos p = e.getBlockPos(); held.putIfAbsent(p, t.id); held.putIfAbsent(p.down(), t.id);
                 occupied.add(p); occupied.add(p.down());
+                markPhysical(p,t.id);markPhysical(p.down(),t.id);
             }
         }
+        expireSections();
         for (Train t : trains.values()) if (t.status == Status.RUNNING || t.status == Status.WAITING_FOR_TRACK) {
             try { move(world, t); } catch (RuntimeException ex) { stop(t); }
         }
@@ -283,12 +330,36 @@ public final class TrainData extends PersistentState {
                 ControllerEntity c=RailPath.controller(world,rail);
                 if(c!=null)current.add(c.getPos());
             }
+            for(RailSections.Key key:sectionHeld.keySet()) {
+                current.add(key.first());current.add(key.last());
+            }
             Set<BlockPos> dirty=new HashSet<>(current);dirty.addAll(signaled);
-            for(BlockPos pos:dirty)if(world.isChunkLoaded(pos))world.updateComparators(pos,RailNet.CONTROLLER);
+            for(BlockPos pos:dirty)if(world.isChunkLoaded(pos))
+                world.updateComparators(pos,world.getBlockState(pos).getBlock());
             signaled.clear();signaled.addAll(current);
         }
         // Entity lookup is by UUID only; no full-world entity or rail scan.
         if (tick % 200 == 0 && trains.values().removeIf(t -> t.carts.isEmpty())) markDirty();
+    }
+    private void markPhysical(BlockPos pos,UUID owner) {
+        UUID existing=physicalOwners.putIfAbsent(pos,owner);
+        if(existing!=null&&!existing.equals(owner))contested.add(pos);
+    }
+    private void expireSections() {
+        sectionHeld.entrySet().removeIf(entry->{
+            Train owner=trains.get(entry.getValue().owner());
+            if(owner==null)return true;
+            // A section remains claimed until the last cart passes its exit.
+            if(owner.status==Status.RUNNING||owner.status==Status.WAITING_FOR_TRACK)
+                for(RailSections.Section section:owner.sections)
+                    if(section.key().equals(entry.getKey())&&owner.distances.length>section.to()
+                        &&owner.progress-Math.max(0,owner.carts.size()-1)*1.15<=owner.distances[section.to()]+0.25)
+                        return false;
+            // Stopped trains with their cars physically in the section keep the lock.
+            for(BlockPos rail:entry.getValue().rails())
+                if(entry.getValue().owner().equals(physicalOwners.get(rail)))return false;
+            return true;
+        });
     }
     private void cleanupMissing(ServerWorld world) {
         for(Train t:new ArrayList<>(trains.values())) {
@@ -310,13 +381,33 @@ public final class TrainData extends PersistentState {
         BlockPos rail = RailPath.nearby(world, controller);
         if (rail == null) return 0;
         if (occupied.contains(rail)) return 15;
+        for(SectionHold section:sectionHeld.values())if(section.rails().contains(rail))return 8;
         return held.containsKey(rail) ? 8 : 0;
     }
     private void move(ServerWorld world, Train t) {
         if (t.path.size() < 2) { stop(t); return; }
         for (UUID id : t.carts) if (!(world.getEntity(id) instanceof AbstractMinecartEntity)) { t.status = Status.WAITING_FOR_TRACK; t.speed = 0; return; }
         int current = Math.min(t.index, t.path.size()-2);
+        // Replan only for changed or unloaded rails. Congestion and manual junction locks
+        // must wait for their owner, never cause unbounded searches each tick.
+        if(t.status==Status.WAITING_FOR_TRACK && t.speed==0 && reroutesThisTick<2
+            &&tick%100==Math.floorMod(t.id.hashCode(),100)) {
+            for(int i=current;i<Math.min(t.path.size(),current+8);i++) {
+                BlockPos p=t.path.get(i);
+                if(!world.isChunkLoaded(p))break;
+                if(!RailPath.rail(world,p)) {
+                    reroutesThisTick++;
+                    replan(world,t);
+                    if(t.status!=Status.WAITING_FOR_TRACK)return;
+                    break;
+                }
+            }
+        }
+        current=Math.min(t.index,t.path.size()-2);
         double horizon = 4 + t.speed*t.speed / 0.04;
+        if(!reserveSections(world,t,current,horizon)) {
+            t.speed=0;t.status=Status.WAITING_FOR_TRACK;return;
+        }
         double ahead = 0;
         for (int i = current; i < t.path.size() && ahead <= horizon; i++) {
             BlockPos p = t.path.get(i);
@@ -348,9 +439,44 @@ public final class TrainData extends PersistentState {
             cart.velocityModified = true;
         }
         if(t.progress>=total-1.0e-5) {
-            t.status=Status.ARRIVED;t.speed=0;t.path=List.of();t.distances=new double[0];
+            t.status=Status.ARRIVED;t.speed=0;t.path=List.of();t.sections=List.of();t.distances=new double[0];
             arrived(world,t);markDirty();
         }
+    }
+    /** Check every required section before committing any new lock this tick. */
+    private boolean reserveSections(ServerWorld world,Train train,int current,double horizon) {
+        List<RailSections.Section> needed=new ArrayList<>();
+        for(RailSections.Section section:train.sections) {
+            if(section.to()<current || section.from()>=train.distances.length
+                ||train.distances[section.from()]>train.progress+horizon)continue;
+            SectionHold owner=sectionHeld.get(section.key());
+            if(owner!=null&&!owner.owner().equals(train.id))return false;
+            if(owner==null) {
+                for(BlockPos rail:section.rails()) {
+                    if(!world.isChunkLoaded(rail))return false;
+                    UUID cart=physicalOwners.get(rail),lookahead=held.get(rail);
+                    if(contested.contains(rail)||(cart!=null&&!cart.equals(train.id))
+                        ||(lookahead!=null&&!lookahead.equals(train.id)))return false;
+                }
+                needed.add(section);
+            }
+        }
+        for(RailSections.Section section:needed)
+            sectionHeld.put(section.key(),new SectionHold(train.id,section.rails()));
+        return true;
+    }
+    /** Keep the old, stopped route if there is no safe alternate. Retry after the next cooldown. */
+    private void replan(ServerWorld world,Train t) {
+        List<BlockPos> previous=t.path;
+        List<RailSections.Section> previousSections=t.sections;
+        double[] distances=t.distances;
+        double progress=t.progress;
+        int index=t.index;
+        List<UUID> carts=new ArrayList<>(t.carts);
+        if(start(world,t))return;
+        t.carts.clear();t.carts.addAll(carts);
+        t.path=previous;t.sections=previousSections;t.distances=distances;t.progress=progress;t.index=index;t.speed=0;
+        t.status=stations.containsKey(t.destination)?Status.WAITING_FOR_TRACK:Status.ROUTE_LOST;
     }
     private void arrived(ServerWorld world,Train t) {
         Line line=t.lineId==null?null:lines.get(t.lineId);
