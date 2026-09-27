@@ -6,7 +6,7 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "railnet:station_controller"
+          "name": "railnet:junction_controller"
         }
       ],
       "conditions": [

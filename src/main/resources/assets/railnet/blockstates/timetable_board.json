@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "railnet:block/rail_controller_board"
+    }
+  }
+}

@@ -1,33 +1,63 @@
 {
   "variants": {
-    "shape=north_south": {
+    "shape=north_south,waterlogged=false": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=east_west": {
+    "shape=north_south,waterlogged=true": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=ascending_east": {
+    "shape=east_west,waterlogged=false": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=ascending_west": {
+    "shape=east_west,waterlogged=true": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=ascending_north": {
+    "shape=ascending_east,waterlogged=false": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=ascending_south": {
+    "shape=ascending_east,waterlogged=true": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=south_east": {
+    "shape=ascending_west,waterlogged=false": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=south_west": {
+    "shape=ascending_west,waterlogged=true": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=north_west": {
+    "shape=ascending_north,waterlogged=false": {
       "model": "railnet:block/crossing_rail"
     },
-    "shape=north_east": {
+    "shape=ascending_north,waterlogged=true": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_south,waterlogged=false": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_south,waterlogged=true": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_east,waterlogged=false": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_east,waterlogged=true": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_west,waterlogged=false": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_west,waterlogged=true": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_west,waterlogged=false": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_west,waterlogged=true": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_east,waterlogged=false": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_east,waterlogged=true": {
       "model": "railnet:block/crossing_rail"
     }
   }

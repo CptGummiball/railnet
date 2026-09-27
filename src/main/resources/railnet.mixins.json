@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.cptgummiball.railnet.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["ManagedCartCollisionMixin"],
+  "injectors": {"defaultRequire": 1}
+}

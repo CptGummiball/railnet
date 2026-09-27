@@ -1,7 +1,22 @@
 {
   "variants": {
-    "": {
-      "model": "railnet:block/rail_controller"
+    "mode=station": {
+      "model": "railnet:block/rail_controller_station"
+    },
+    "mode=junction": {
+      "model": "railnet:block/rail_controller_junction"
+    },
+    "mode=block": {
+      "model": "railnet:block/rail_controller_block"
+    },
+    "mode=depot": {
+      "model": "railnet:block/rail_controller_depot"
+    },
+    "mode=signal": {
+      "model": "railnet:block/rail_controller_signal"
+    },
+    "mode=board": {
+      "model": "railnet:block/rail_controller_board"
     }
   }
 }

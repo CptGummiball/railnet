@@ -20,7 +20,7 @@ public final class RailCommands {
     private RailCommands() {}
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> {
-            var root = literal("railnet");
+            var root = literal("railnet").requires(source -> source.hasPermissionLevel(2));
             var train = literal("train");
             var id = argument("id", StringArgumentType.word());
             for (String action : new String[]{"start", "stop", "reverse", "speed"}) {
@@ -73,7 +73,7 @@ public final class RailCommands {
                 case "speed" -> { t.preset = (t.preset+1)%3; data.markDirty(); }
             }
             player.sendMessage(Text.translatable(okay ? "railnet.updated" : "railnet.no_route"), true);
-            Menus.train(player, t); return okay ? 1 : 0;
+            RailScreens.openTrain(player, t); return okay ? 1 : 0;
         } catch (IllegalArgumentException ex) { return 0; }
     }
     private static int controller(ServerCommandSource source, BlockPos pos, String action, String value) {
@@ -84,10 +84,13 @@ public final class RailCommands {
         try {
             switch (action) {
                 case "lock" -> c.locked = !c.locked;
-                case "mode" -> c.mode = ControllerEntity.Mode.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+                case "mode" -> {
+                    if(!(c.getCachedState().getBlock() instanceof LegacyControllerBlock))return 0;
+                    c.setMode(ControllerEntity.Mode.valueOf(value.toUpperCase(java.util.Locale.ROOT)));
+                }
                 case "name" -> { if (value.length() > 40 || value.isBlank()) return 0; c.stationName = value; }
             }
         } catch (IllegalArgumentException ex) { return 0; }
-        c.markDirty(); TrainData.get(world).register(c); Menus.controller(player, c); return 1;
+        c.markDirty(); TrainData.get(world).register(c); RailScreens.controller(player, c); return 1;
     }
 }

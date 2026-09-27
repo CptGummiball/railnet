@@ -4,6 +4,7 @@ import net.minecraft.block.AbstractRailBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.enums.RailShape;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.world.World;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
@@ -17,17 +18,21 @@ public final class RailPath {
         return world.isChunkLoaded(p) && world.getBlockState(p).getBlock() instanceof AbstractRailBlock;
     }
     public static BlockPos nearby(ServerWorld world, BlockPos p) {
-        for (int y = 0; y >= -2; y--) {
+        for (int y : new int[]{0,1,2,-1,-2}) {
             BlockPos q = p.add(0, y, 0);
             if (rail(world, q)) return q;
             for (Direction d : Direction.Type.HORIZONTAL) if (rail(world, q.offset(d))) return q.offset(d);
         }
         return null;
     }
-    public static ControllerEntity controller(ServerWorld world, BlockPos rail) {
-        for (int y = -1; y <= 1; y++) for (Direction d : Direction.Type.HORIZONTAL) {
-            BlockPos p = rail.offset(d).up(y);
-            if (world.isChunkLoaded(p) && world.getBlockEntity(p) instanceof ControllerEntity c) return c;
+    public static ControllerEntity controller(World world, BlockPos rail) {
+        for (int y : new int[]{0,-1,-2,1}) {
+            BlockPos p=rail.up(y);
+            if(world.isChunkLoaded(p) && world.getBlockEntity(p) instanceof ControllerEntity c)return c;
+        }
+        for (int y : new int[]{0,-1,-2,1}) for(Direction d:Direction.Type.HORIZONTAL) {
+            BlockPos p=rail.offset(d).up(y);
+            if(world.isChunkLoaded(p) && world.getBlockEntity(p) instanceof ControllerEntity c)return c;
         }
         return null;
     }
