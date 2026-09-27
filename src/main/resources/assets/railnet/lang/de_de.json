@@ -1,0 +1,20 @@
+{
+  "block.railnet.rail_controller": "Schienensteuerung",
+  "block.railnet.crossing_rail": "Kreuzungsschiene",
+  "railnet.detached": "Wagen entkuppelt",
+  "railnet.not_coupled": "Wagen ist nicht gekuppelt",
+  "railnet.first_cart": "Wähle einen zweiten Wagen mit der Kette",
+  "railnet.coupling_failed": "Kuppeln fehlgeschlagen (Abstand, Länge oder fahrender Zug)",
+  "railnet.coupled": "Wagen gekuppelt",
+  "railnet.train_menu": "Zug: %s | %s | %s Wagen",
+  "railnet.start": "[Start]",
+  "railnet.stop": "[Stopp]",
+  "railnet.reverse": "[Wenden]",
+  "railnet.choose_destination": "Geladenen Bahnhof auswählen:",
+  "railnet.speed": "[Tempo wechseln]",
+  "railnet.controller_menu": "Steuerung: %s | %s",
+  "railnet.lock": "[Weichensperre umschalten: %s]",
+  "railnet.rename_hint": "Umbenennen: /%s eingeben",
+  "railnet.updated": "Aktualisiert",
+  "railnet.no_route": "Keine sichere Route gefunden"
+}

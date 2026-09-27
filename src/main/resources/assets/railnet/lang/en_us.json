@@ -1,0 +1,20 @@
+{
+  "block.railnet.rail_controller": "Rail Controller",
+  "block.railnet.crossing_rail": "Crossing Rail",
+  "railnet.detached": "Cart detached",
+  "railnet.not_coupled": "Cart is not coupled",
+  "railnet.first_cart": "Select a second cart with the chain",
+  "railnet.coupling_failed": "Coupling failed (distance, length or moving train)",
+  "railnet.coupled": "Minecarts coupled",
+  "railnet.train_menu": "Train: %s | %s | %s carts",
+  "railnet.start": "[Start]",
+  "railnet.stop": "[Stop]",
+  "railnet.reverse": "[Reverse]",
+  "railnet.choose_destination": "Choose a loaded station:",
+  "railnet.speed": "[Cycle speed]",
+  "railnet.controller_menu": "Controller: %s | %s",
+  "railnet.lock": "[Toggle junction lock: %s]",
+  "railnet.rename_hint": "Rename: type /%s",
+  "railnet.updated": "Updated",
+  "railnet.no_route": "No safe route found"
+}

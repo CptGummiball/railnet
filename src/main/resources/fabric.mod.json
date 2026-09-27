@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "railnet",
+  "version": "${version}",
+  "name": "RailNet",
+  "description": "Vanilla minecarts, coupled trains and safe station routing.",
+  "authors": ["cptgummiball"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": { "main": ["dev.cptgummiball.railnet.RailNet"] },
+  "depends": { "fabricloader": ">=0.16.14", "minecraft": "~1.21.1", "java": ">=21", "fabric-api": "*" }
+}

@@ -1,0 +1,34 @@
+{
+  "variants": {
+    "shape=north_south": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=east_west": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_east": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_west": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_north": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=ascending_south": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_east": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=south_west": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_west": {
+      "model": "railnet:block/crossing_rail"
+    },
+    "shape=north_east": {
+      "model": "railnet:block/crossing_rail"
+    }
+  }
+}
