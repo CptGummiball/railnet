@@ -1,10 +1,6 @@
 # RailNet (Fabric, Minecraft 1.21.1)
 
-Prototype implementation from the eleven design documents in `docs/`. Author: **cptgummiball**; Java namespace: `dev.cptgummiball`.
-
-## Install / build
-
-Install Fabric Loader and Fabric API for Minecraft 1.21.1 on both client and dedicated server. Build with Java 21: `./gradlew build` (Windows: `gradlew.bat build`). Put `build/libs/railnet-0.2.0.jar` into each instance's `mods` directory. The included Gradle wrapper downloads Gradle 8.10.2 on first use.
+Prototype implementation
 
 ## Play
 
@@ -19,5 +15,3 @@ The server saves cart UUIDs, train compositions, stations and destinations per d
 ## Scope and known limitations
 
 This is an early playable implementation, **not a 1.0 release**. It has no full-screen GUI, lines, timetables, display panel, interval service, route cache or compressed graph yet. Route search is bounded and on demand rather than world-wide or per tick. The train tick currently checks a short look-ahead and reserves occupied rail positions; it has not been load tested for dozens of trains or 16+ carts. The controlled carts still run Vanilla's entity tick before the server adjusts their positions, so crossing and collision behaviour need in-game verification. Long tracks with unloaded sections cannot be routed until their chunks are loaded. Station records are created when controllers are placed or opened. Do not use this prototype in an important world without a backup.
-
-Priorities for a release are a truly stable per-cart movement integration, incremental compressed rail graph, braking/reservation tests, in-game screen, redstone signal settings, and server load testing. The original numbered concept documents remain in `docs/` to guide that work.
